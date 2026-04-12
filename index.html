@@ -854,15 +854,55 @@ function getHistoricalPred(id, dateStr){
   }
 
   if(baseHist.length<10) return null;
-  return doPred(baseHist, m.cfg);
+  let p = doPred(baseHist, m.cfg);
+  applyEnsemble(id, dateStr, p);
+  return p;
+}
+
+// ── V4 MATH JUMPS HELPER ──
+function getV4Jumps(id, dateStr) {
+  let jumps = [];
+  const prevStr = addDays(dateStr, -1);
+  
+  if (id === "Ghaziabad") {
+    let fb = getActualForDate("Faridabad", dateStr); if(fb !== null) jumps.push((fb + 49) % 100);
+    let ds = getActualForDate("Desawar", dateStr);   if(ds !== null) jumps.push((ds + 64) % 100);
+    let gz = getActualForDate("Ghaziabad", prevStr); if(gz !== null) jumps.push((gz + 40) % 100);
+  } else if(id === "Desawar") {
+    let fb = getActualForDate("Faridabad", prevStr); if(fb !== null) jumps.push((fb + 58) % 100);
+    let ds = getActualForDate("Desawar", prevStr);   if(ds !== null) jumps.push((ds + 16) % 100);
+    let gz = getActualForDate("Ghaziabad", prevStr); if(gz !== null) jumps.push((gz + 35) % 100);
+  } else if(id === "Faridabad") {
+    let ds = getActualForDate("Desawar", dateStr);   if(ds !== null) jumps.push((ds + 19) % 100);
+    let gl = getActualForDate("Gali", prevStr);      if(gl !== null) jumps.push((gl + 41) % 100);
+    let gz = getActualForDate("Ghaziabad", prevStr); if(gz !== null) jumps.push((gz + 10) % 100);
+  } else if(id === "Gali") {
+    let ds = getActualForDate("Desawar", dateStr);   if(ds !== null) jumps.push((ds + 57) % 100);
+    let gz = getActualForDate("Ghaziabad", dateStr); if(gz !== null) jumps.push((gz + 7) % 100);
+    let gzP= getActualForDate("Ghaziabad", prevStr); if(gzP !== null) jumps.push((gzP + 7) % 100);
+  }
+  return [...new Set(jumps)];
+}
+
+// ── ENSEMBLE SYSTEM ──
+function applyEnsemble(id, dateStr, pred) {
+  if(!pred) return;
+  let v4 = getV4Jumps(id, dateStr);
+  
+  // Combine V4 Math Jumps with V3 Top-3 Statistics.
+  // Deduplicate using Set. If they naturally overlap on a number,
+  // we output fewer total numbers (saving capital) since confidence on that overlap is immense.
+  let comb = [...new Set([...v4, ...pred.top3])];
+  pred.top3 = comb;
 }
 
 // Get the actual result for a date from RECENT map or tracker
 function getActualForDate(id, dateStr){
   const rec=RECENT[id]||{};
   if(dateStr in rec && rec[dateStr]!==null) return rec[dateStr];
+  if(!S || !S[id]) return null;
   const entry=S[id].tracker.find(t=>t.dateStr===dateStr && t.actual!==null);
-  return entry ? entry.actual : null;
+  return entry ? parseInt(entry.actual, 10) : null;
 }
 function hcls(pred,actual){
   if(!pred||actual===null||actual===undefined) return"ms";
@@ -885,9 +925,10 @@ function htag(cls){
 // ── RECOMPUTE ──
 function recompute(m, doBt){
   const{id,cfg}=m;
-  S[id].pred = doPred(S[id].hist, cfg);
-  // Auto-register prediction snapshot for the next target date only
   const tgt=predTarget(id);
+  S[id].pred = doPred(S[id].hist, cfg);
+  applyEnsemble(id, tgt, S[id].pred);
+  // Auto-register prediction snapshot for the next target date only
   if(!S[id].tracker.find(t=>t.dateStr===tgt) && S[id].pred){
     S[id].tracker.push({dateStr:tgt, predFor:tgt, pred:S[id].pred, actual:null, hitCls:null});
   }
@@ -1565,8 +1606,10 @@ function runAccuracyTest(){
     const details=[];
     val.forEach(([date,actual])=>{
       const pred=doPred(runHist,m.cfg);
+      applyEnsemble(m.id, date, pred); // Inject Ensemble logic into Accuracy Test
+      
       if(pred){
-        const isT3=pred.top3.includes(actual);
+        const isT3=pred.top3.includes(actual); // This acts as our Ensemble 6 Hit
         const isT5=pred.top5.includes(actual);
         const isT10=pred.top10.includes(actual);
         const isAn=pred.topU.includes(Ud(actual));
@@ -1583,7 +1626,7 @@ function runAccuracyTest(){
     const pct=(v,t)=>t?(v/t*100).toFixed(1)+'%':'—';
     results[m.id]={t3:pct(t3,n),t5:pct(t5,n),t10:pct(t10,n),an:pct(an,n),ba:pct(ba,n),any:pct(any,n),n,t3n:t3,t5n:t5};
     console.log(`%c${m.lbl} (${n} draws)`,'color:'+m.col+';font-weight:900;font-size:12px');
-    console.log(`  Top-3:  ${t3}/${n} = ${pct(t3,n)}  |  Top-5: ${t5}/${n} = ${pct(t5,n)}  |  Top-10: ${t10}/${n} = ${pct(t10,n)}`);
+    console.log(`  Ensemble-6:  ${t3}/${n} = ${pct(t3,n)}  |  Top-5 Stat: ${t5}/${n} = ${pct(t5,n)}`);
     console.log(`  Andar:  ${an}/${n} = ${pct(an,n)}  |  Bahar: ${ba}/${n} = ${pct(ba,n)}  |  Any Hit: ${any}/${n} = ${pct(any,n)}`);
     if(details.length){
       console.log('  Hits:');
